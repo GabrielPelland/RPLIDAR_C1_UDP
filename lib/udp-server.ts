@@ -49,7 +49,7 @@ class UDPServer {
 
     public sendMessage(message: string, targetIP: string, targetPort: number) {
         const data = Buffer.from(message);
-        this.socket.send(data, targetPort, targetIP, (err) => {
+        this.socket.send(data as any, targetPort, targetIP, (err) => {
             if (err) console.error(`UDP Send error: ${err}`);
         });
     }

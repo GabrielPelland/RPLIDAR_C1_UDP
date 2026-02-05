@@ -47,7 +47,6 @@ class ScriptManager {
             instance.logs.push(log);
             if (instance.logs.length > 1000) instance.logs.shift();
             console.log(`[${scriptName}] STDOUT: ${log}`);
-            // In a real app, broadcast via socket.io here
         });
 
         child.stderr.on("data", (data) => {

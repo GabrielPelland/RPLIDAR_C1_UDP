@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardHeader, CardBody, Input, Button, Divider, ScrollShadow, Chip } from "@nextui-org/react";
-import { Send, Radio, MessageSquare } from "lucide-react";
+import { Card, CardHeader, CardBody, Input, Button, Divider, ScrollShadow, Chip } from "@heroui/react";
+import { Send, Radar, MessageSquare } from "lucide-react";
 
 export function UDPController() {
     const [messages, setMessages] = useState<any[]>([]);
@@ -53,7 +53,7 @@ export function UDPController() {
                 <CardHeader className="flex flex-col items-start px-6 pt-6">
                     <div className="flex items-center gap-2">
                         <Send size={20} className="text-purple-400" />
-                        <h2 className="text-xl font-bold bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+                        <h2 className="text-xl font-bold bg-linear-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
                             Envoyer UDP
                         </h2>
                     </div>
@@ -90,7 +90,7 @@ export function UDPController() {
                     <Button
                         color="secondary"
                         variant="shadow"
-                        fullWidth
+                        className="w-full"
                         onPress={handleSend}
                         isLoading={loading}
                         startContent={!loading && <Send size={16} />}
@@ -103,8 +103,8 @@ export function UDPController() {
             <Card className="bg-zinc-900/50 border-zinc-800 shadow-xl backdrop-blur-md">
                 <CardHeader className="flex flex-col items-start px-6 pt-6">
                     <div className="flex items-center gap-2">
-                        <Radio size={20} className="text-emerald-400" />
-                        <h2 className="text-xl font-bold bg-gradient-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">
+                        <Radar size={20} className="text-emerald-400" />
+                        <h2 className="text-xl font-bold bg-linear-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">
                             Flux UDP Entrant
                         </h2>
                     </div>
