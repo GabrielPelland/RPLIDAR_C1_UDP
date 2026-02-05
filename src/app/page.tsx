@@ -1,8 +1,8 @@
 "use client";
 
-import { ScriptControl } from "@/components/rplidar/ScriptControl";
-import { LogViewer } from "@/components/rplidar/LogViewer";
-import { UDPController } from "@/components/rplidar/UDPController";
+import { ScriptControl } from "@/components/ScriptControl";
+import { LogViewer } from "@/components/LogViewer";
+import { UDPController } from "@/components/UDPController";
 import { useEffect, useState } from "react";
 
 export default function Dashboard() {

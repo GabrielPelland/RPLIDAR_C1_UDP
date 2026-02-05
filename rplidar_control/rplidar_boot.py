@@ -166,6 +166,8 @@ def draw_grid_and_roi(screen, world_to_screen, roi_w_mm, roi_d_mm, font):
     screen.blit(label, (20, 20))
 
 
+import signal
+
 def main():
     global roi_width_mm, roi_depth_mm, zoom, ANGLE_OFFSET_DEG
 
@@ -184,8 +186,24 @@ def main():
     # Lidar init
     lidar = PyRPlidar()
     lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
+    
+    # Robust init: ensure lidar is stopped and buffer is clean
+    print("PyRPlidar Info : initializing device...")
+    try:
+        lidar.stop()
+        time.sleep(0.5)
+    except:
+        pass
+
     lidar.set_motor_pwm(MOTOR_PWM)
     time.sleep(STARTUP_DELAY_S)
+
+    # Signal handler for graceful stop from ScriptManager
+    def handle_sigterm(signum, frame):
+        print("\nSIGTERM received. Stopping lidar...")
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
     # même pattern que ton script original
     scan_generator = lidar.force_scan()

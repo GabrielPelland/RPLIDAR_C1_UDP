@@ -78,14 +78,32 @@ def build_xy_packet(points):
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+import signal
+
 def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     target = (UDP_IP, UDP_PORT)
 
     lidar = PyRPlidar()
     lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
+    
+    # Robust init: ensure lidar is stopped and buffer is clean
+    print("PyRPlidar Info : initializing device...")
+    try:
+        lidar.stop()
+        time.sleep(0.5)
+    except:
+        pass
+
     lidar.set_motor_pwm(MOTOR_PWM)
     time.sleep(STARTUP_DELAY_S)
+
+    # Signal handler for graceful stop from ScriptManager
+    def handle_sigterm(signum, frame):
+        print("\nSIGTERM received. Stopping lidar...")
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handle_sigterm)
 
     scan_generator = lidar.force_scan()
 
