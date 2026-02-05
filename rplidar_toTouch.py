@@ -1,27 +1,24 @@
 import math
 import time
 import socket
-from collections import deque
+from collections import deque, defaultdict
 from pyrplidar import PyRPlidar
 
 # -----------------------------
 # UDP target
 # -----------------------------
 UDP_IP = "192.168.0.12"
-UDP_PORT = 5005  # mets le port que tu écoutes dans TD
-
-# Envoi snapshot (Hz)
-SEND_HZ = 60.0
+UDP_PORT = 5005          # port TouchDesigner
+SEND_HZ = 60.0           # latence ~ 1/60 = 16.6ms
 SEND_PERIOD = 1.0 / SEND_HZ
 
-# Fenêtre glissante pour le nuage (ms)
-WINDOW_MS = 60  # 30-100ms typique: plus bas = plus réactif
-
-# Détection
-DETECT_MIN_POINTS = 6  # ajuste selon bruit
-
-# Limite points dans un paquet (évite paquets trop gros)
-MAX_POINTS_PER_PACKET = 600  # ajuste si besoin
+# -----------------------------
+# Micro-buffer + nettoyage
+# -----------------------------
+WINDOW_MS = 70            # fenêtre glissante courte (50-90ms typique)
+GRID_STEP = 0.01          # taille cellule en coords 0..1 (0.01 = 1% => ~1 cm si ROI=1m)
+MIN_HITS = 2              # cellule doit être vue au moins 2 fois dans la fenêtre
+MAX_POINTS_PER_PACKET = 600  # limite sécurité (MTU / perf)
 
 # -----------------------------
 # Lidar
@@ -36,15 +33,11 @@ MIN_DISTANCE_MM = 50
 MAX_DISTANCE_MM = 3000
 
 # -----------------------------
-# ROI (mm) + orientation
+# ROI + orientation
 # -----------------------------
 ROI_WIDTH_MM = 1000
 ROI_DEPTH_MM = 1000
-ANGLE_OFFSET_DEG = 0.0
-
-# Sweep detection
-WRAP_HIGH_DEG = 350.0
-WRAP_LOW_DEG = 10.0
+ANGLE_OFFSET_DEG = 0.0   # ajuste si nécessaire
 
 
 def clamp01(v: float) -> float:
@@ -71,16 +64,22 @@ def normalize_xy01(x_mm: float, y_mm: float, w_mm: float, d_mm: float):
     return clamp01(x01), clamp01(y01)
 
 
-def build_table_packet(sweep_idx: int, detect: int, pts01):
-    # pts01: list[(x01,y01)]
-    lines = []
-    lines.append(
-        f"meta\tsweep\t{sweep_idx}\tdetect\t{detect}\tcount\t{len(pts01)}\twidth_mm\t{ROI_WIDTH_MM}\tdepth_mm\t{ROI_DEPTH_MM}"
-    )
-    lines.append("x\ty")
-    for x, y in pts01:
+def quantize(x01: float, y01: float, step: float):
+    # Convertit en "cellule" stable
+    gx = int(x01 / step)
+    gy = int(y01 / step)
+    return gx, gy
+
+
+def build_xy_packet(points):
+    """
+    points: list[(x01,y01)]
+    Toujours un header 'x\ty' même si points est vide.
+    """
+    lines = ["x\ty"]
+    for x, y in points:
         lines.append(f"{x:.4f}\t{y:.4f}")
-    return ("\n".join(lines)).encode("utf-8")
+    return ("\n".join(lines) + "\n").encode("utf-8")
 
 
 def main():
@@ -92,58 +91,60 @@ def main():
     lidar.set_motor_pwm(MOTOR_PWM)
     time.sleep(STARTUP_DELAY_S)
 
-    # Pattern identique à ton script original
+    # Pattern identique à ton script original (callable generator)
     scan_generator = lidar.force_scan()
 
-    # Buffer glissant: (t, x01, y01)
+    # Buffer glissant: (t, x01, y01, gx, gy)
     buf = deque()
-
-    prev_angle = None
-    sweep_idx = 0
+    window_s = WINDOW_MS / 1000.0
 
     last_send = time.perf_counter()
-    window_s = WINDOW_MS / 1000.0
 
     try:
         for scan in scan_generator():
             now = time.perf_counter()
 
-            angle = float(scan.angle)
+            # 1) Ajouter point si ROI
             dist_mm = float(scan.distance)
-
-            # Sweep detection (optionnel, mais utile en meta)
-            if prev_angle is not None:
-                wrapped = (prev_angle > WRAP_HIGH_DEG and angle < WRAP_LOW_DEG) or (angle < prev_angle)
-                if wrapped:
-                    sweep_idx += 1
-            prev_angle = angle
-
-            # Ajout point si ROI
             if MIN_DISTANCE_MM <= dist_mm <= MAX_DISTANCE_MM:
+                angle = float(scan.angle)
                 x_mm, y_mm = polar_to_xy_mm(angle, dist_mm, ANGLE_OFFSET_DEG)
+
                 if in_roi(x_mm, y_mm, ROI_WIDTH_MM, ROI_DEPTH_MM):
                     x01, y01 = normalize_xy01(x_mm, y_mm, ROI_WIDTH_MM, ROI_DEPTH_MM)
-                    buf.append((now, x01, y01))
+                    gx, gy = quantize(x01, y01, GRID_STEP)
+                    buf.append((now, x01, y01, gx, gy))
 
-            # Purge fenêtre glissante
+            # 2) Purge fenêtre glissante
             cutoff = now - window_s
             while buf and buf[0][0] < cutoff:
                 buf.popleft()
 
-            # Envoi périodique (low latency)
+            # 3) Envoi périodique
             if (now - last_send) >= SEND_PERIOD:
-                # Snapshot des points
-                pts = [(x, y) for (_t, x, y) in buf]
+                # Regroupe par cellules et applique "persistance minimale"
+                counts = defaultdict(int)
+                sums = defaultdict(lambda: [0.0, 0.0])
 
-                # Option: limiter nb de points (garde des points espacés)
-                if len(pts) > MAX_POINTS_PER_PACKET:
-                    step = len(pts) / MAX_POINTS_PER_PACKET
-                    pts = [pts[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
+                for _t, x01, y01, gx, gy in buf:
+                    key = (gx, gy)
+                    counts[key] += 1
+                    sums[key][0] += x01
+                    sums[key][1] += y01
 
-                detect = 1 if len(pts) >= DETECT_MIN_POINTS else 0
+                points = []
+                for key, c in counts.items():
+                    if c >= MIN_HITS:
+                        sx, sy = sums[key]
+                        points.append((sx / c, sy / c))  # centre moyen de la cellule
 
-                pkt = build_table_packet(sweep_idx, detect, pts)
-                sock.sendto(pkt, target)
+                # limite sécurité (downsample uniforme)
+                if len(points) > MAX_POINTS_PER_PACKET:
+                    step = len(points) / MAX_POINTS_PER_PACKET
+                    points = [points[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
+
+                # Toujours envoyer au moins le header
+                sock.sendto(build_xy_packet(points), target)
 
                 last_send = now
 
