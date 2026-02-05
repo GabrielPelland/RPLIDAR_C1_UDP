@@ -9,8 +9,8 @@ from pyrplidar import PyRPlidar
 # UDP config
 # -----------------------------
 UDP_IP = "192.168.0.12"
-UDP_PORT = 5005  # <-- change si tu veux
-UDP_SEND_ALL_POINTS = False  # False = envoie uniquement points ROI (recommandé)
+UDP_PORT = 5005
+UDP_SEND_ALL_POINTS = False  # False = envoie uniquement points ROI
 
 # -----------------------------
 # Window / UI

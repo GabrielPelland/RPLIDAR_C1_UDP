@@ -8,17 +8,17 @@ from pyrplidar import PyRPlidar
 # UDP target
 # -----------------------------
 UDP_IP = "192.168.0.12"
-UDP_PORT = 5005          # port TouchDesigner
+UDP_PORT = 5005
 SEND_HZ = 60.0           # latence ~ 1/60 = 16.6ms
 SEND_PERIOD = 1.0 / SEND_HZ
 
 # -----------------------------
 # Micro-buffer + nettoyage
 # -----------------------------
-WINDOW_MS = 70            # fenêtre glissante courte (50-90ms typique)
+WINDOW_MS = 70            # fenêtre glissante courte (50-90ms)
 GRID_STEP = 0.01          # taille cellule en coords 0..1 (0.01 = 1% => ~1 cm si ROI=1m)
 MIN_HITS = 2              # cellule doit être vue au moins 2 fois dans la fenêtre
-MAX_POINTS_PER_PACKET = 600  # limite sécurité (MTU / perf)
+MAX_POINTS_PER_PACKET = 600  # MTU
 
 # -----------------------------
 # Lidar
@@ -37,7 +37,7 @@ MAX_DISTANCE_MM = 3000
 # -----------------------------
 ROI_WIDTH_MM = 1000
 ROI_DEPTH_MM = 1000
-ANGLE_OFFSET_DEG = 0.0   # ajuste si nécessaire
+ANGLE_OFFSET_DEG = 0.0 
 
 
 def clamp01(v: float) -> float:
@@ -72,10 +72,6 @@ def quantize(x01: float, y01: float, step: float):
 
 
 def build_xy_packet(points):
-    """
-    points: list[(x01,y01)]
-    Toujours un header 'x\ty' même si points est vide.
-    """
     lines = ["x\ty"]
     for x, y in points:
         lines.append(f"{x:.4f}\t{y:.4f}")
@@ -91,7 +87,6 @@ def main():
     lidar.set_motor_pwm(MOTOR_PWM)
     time.sleep(STARTUP_DELAY_S)
 
-    # Pattern identique à ton script original (callable generator)
     scan_generator = lidar.force_scan()
 
     # Buffer glissant: (t, x01, y01, gx, gy)
@@ -122,7 +117,6 @@ def main():
 
             # 3) Envoi périodique
             if (now - last_send) >= SEND_PERIOD:
-                # Regroupe par cellules et applique "persistance minimale"
                 counts = defaultdict(int)
                 sums = defaultdict(lambda: [0.0, 0.0])
 
@@ -136,14 +130,12 @@ def main():
                 for key, c in counts.items():
                     if c >= MIN_HITS:
                         sx, sy = sums[key]
-                        points.append((sx / c, sy / c))  # centre moyen de la cellule
+                        points.append((sx / c, sy / c))
 
-                # limite sécurité (downsample uniforme)
                 if len(points) > MAX_POINTS_PER_PACKET:
                     step = len(points) / MAX_POINTS_PER_PACKET
                     points = [points[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
 
-                # Toujours envoyer au moins le header
                 sock.sendto(build_xy_packet(points), target)
 
                 last_send = now
