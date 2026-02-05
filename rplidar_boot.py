@@ -3,9 +3,6 @@ import time
 import json
 from pyrplidar import PyRPlidar
 
-# -----------------------------
-# Config
-# -----------------------------
 PORT = "/dev/ttyUSB0"
 BAUDRATE = 460800
 TIMEOUT_S = 3
@@ -13,40 +10,24 @@ TIMEOUT_S = 3
 MOTOR_PWM = 500
 STARTUP_DELAY_S = 2.0
 
-# Lidar distance filtering (meters)
-MIN_DIST_M = 0.05    # 5 cm
-MAX_DIST_M = 3.0     # 3 m (ou adapte selon ton lidar)
+MIN_DIST_M = 0.05
+MAX_DIST_M = 3.0
 
-# ROI square 1m x 1m in front of lidar:
-# x left/right, y forward (down the frame)
-ROI_HALF_WIDTH_M = 0.5   # +/- 0.5m
-ROI_DEPTH_M = 1.0        # 0..1.0m
+ROI_HALF_WIDTH_M = 0.5   # x ∈ [-0.5, +0.5]
+ROI_DEPTH_M = 1.0        # y ∈ [0, 1.0]
 
-# Angle alignment:
-# We define angle=0° as pointing "forward" (down the frame).
-# If your lidar's 0° is not forward, adjust this offset.
-ANGLE_OFFSET_DEG = 0.0   # try 0, 90, -90, 180 ...
+ANGLE_OFFSET_DEG = 0.0   # ajuste 0 / 90 / -90 / 180 si nécessaire
 
-# Sweep completion detection (hysteresis)
 WRAP_HIGH_DEG = 350.0
 WRAP_LOW_DEG = 10.0
 
-# Output rate control
-PRINT_EMPTY_SWEEPS = False  # print even if no points in ROI
+PRINT_EMPTY_SWEEPS = False
 
 
-def polar_to_xy_m(angle_deg: float, distance_m: float, angle_offset_deg: float) -> tuple[float, float]:
-    """
-    Convert lidar polar measurement to cartesian (x,y) in meters.
-    Convention:
-      - y is "forward" (toward the frame, downward)
-      - x is left/right
-      - angle=0 points forward
-      - positive angle rotates CCW (standard math)
-    """
+def polar_to_xy_m(angle_deg: float, distance_m: float, angle_offset_deg: float):
     a = math.radians(angle_deg + angle_offset_deg)
-    x = distance_m * math.sin(a)  # sin gives left/right with our convention
-    y = distance_m * math.cos(a)  # cos gives forward
+    x = distance_m * math.sin(a)   # gauche/droite
+    y = distance_m * math.cos(a)   # avant (vers le bas du cadre)
     return x, y
 
 
@@ -65,17 +46,16 @@ def main():
     sweep_idx = 0
 
     try:
-        # NOTE: In most versions, force_scan() is iterable directly.
-        for scan in lidar.force_scan():
-            # scan.angle in degrees, scan.distance in mm (based on your previous script)
+        # IMPORTANT: on évite force_scan() ici
+        # Selon ta version, ça peut être start_scan() ou scan()
+        scan_iter = lidar.start_scan()  # <-- si AttributeError, remplace par lidar.scan() ou lidar.start_scan_express()
+
+        for scan in scan_iter:
             angle = float(scan.angle)
             dist_m = float(scan.distance) / 1000.0
 
-            # Distance gating
             if MIN_DIST_M <= dist_m <= MAX_DIST_M:
                 x, y = polar_to_xy_m(angle, dist_m, ANGLE_OFFSET_DEG)
-
-                # Keep only points in the 1m x 1m square ROI
                 if in_roi(x, y):
                     points_roi.append({
                         "x": round(x, 4),
@@ -84,7 +64,6 @@ def main():
                         "a": round(angle, 2),
                     })
 
-            # Detect sweep completion with hysteresis
             if prev_angle is not None:
                 wrapped = (prev_angle > WRAP_HIGH_DEG and angle < WRAP_LOW_DEG)
                 if wrapped:
@@ -92,17 +71,12 @@ def main():
                     payload = {
                         "t": time.time(),
                         "sweep": sweep_idx,
-                        "roi": {
-                            "half_width_m": ROI_HALF_WIDTH_M,
-                            "depth_m": ROI_DEPTH_M
-                        },
                         "count": len(points_roi),
-                        "points": points_roi
+                        "roi": {"half_width_m": ROI_HALF_WIDTH_M, "depth_m": ROI_DEPTH_M},
+                        "points": points_roi,
                     }
-
                     if PRINT_EMPTY_SWEEPS or points_roi:
                         print(json.dumps(payload, ensure_ascii=False))
-
                     points_roi = []
 
             prev_angle = angle
@@ -111,11 +85,11 @@ def main():
         print("\nStopped (Ctrl+C).")
 
     finally:
-        # Be defensive: some libs can throw on stop if already stopped
-        try:
-            lidar.stop()
-        except Exception:
-            pass
+        for fn in ("stop",):
+            try:
+                getattr(lidar, fn)()
+            except Exception:
+                pass
         try:
             lidar.set_motor_pwm(0)
         except Exception:
