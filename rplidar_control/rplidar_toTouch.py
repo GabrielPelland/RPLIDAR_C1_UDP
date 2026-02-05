@@ -11,7 +11,7 @@ from pyrplidar import PyRPlidar
 # -----------------------------
 # UDP config
 # -----------------------------
-UDP_IP = "127.0.0.1"      # Loopback for local dashboard, can be updated via command
+UDP_TARGETS = ["127.0.0.1", "10.0.1.2"]  # 127.0.0.1 for local, 10.0.1.2 for external PC
 UDP_PORT = 5005
 COMMAND_PORT = 5006       # Listener for config updates
 SEND_HZ = 60.0
@@ -190,7 +190,14 @@ def main():
                         "roi": {"w": CONFIG["ROI_WIDTH"], "d": CONFIG["ROI_DEPTH"]}
                     }
                     data = json.dumps(payload).encode("utf-8")
-                    sock.sendto(data, (UDP_IP, UDP_PORT))
+                    
+                    # Broadcast to all targets
+                    for ip in UDP_TARGETS:
+                        try:
+                            sock.sendto(data, (ip, UDP_PORT))
+                        except:
+                            pass
+                            
                     packet_count += 1
                     if packet_count % 100 == 0:
                         print(f"UDP Info : Sent {packet_count} packets. Points in ROI: {len(points)}", flush=True)
