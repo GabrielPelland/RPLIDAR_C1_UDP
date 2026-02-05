@@ -70,9 +70,12 @@ export default function Dashboard() {
 
       <footer className="max-w-7xl mx-auto mt-12 pb-8 pt-6 border-t border-zinc-200 flex justify-between items-center text-zinc-400 text-[10px] font-medium uppercase tracking-widest">
         <div>RP-C1-UDP-01 // PRODUCTION</div>
-        <div className="flex gap-4">
-          <span>v2.0.0</span>
-          <span>Support Tactile</span>
+        <div className="flex flex-col items-end gap-1">
+          <div className="flex gap-4">
+            <span className="text-zinc-600 font-bold bg-zinc-200 px-2 py-0.5 rounded">v2.1.0 - REFRESH CHECK</span>
+            <span>Support Tactile</span>
+          </div>
+          <div className="text-[8px] opacity-50">Build: {new Date().toLocaleString()}</div>
         </div>
       </footer>
     </main>
