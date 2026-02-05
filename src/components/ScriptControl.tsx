@@ -48,7 +48,7 @@ export function ScriptControl() {
     return (
         <Card className="bg-zinc-900/50 border-zinc-800 shadow-xl backdrop-blur-md">
             <CardHeader className="flex flex-col items-start px-6 pt-6">
-                <h2 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                <h2 className="text-xl font-bold bg-linear-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
                     Contrôle des Scripts
                 </h2>
                 <p className="text-sm text-zinc-400">Gérez les processus Python sur le Raspberry Pi</p>

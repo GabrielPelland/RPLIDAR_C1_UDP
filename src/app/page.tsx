@@ -21,7 +21,7 @@ export default function Dashboard() {
       <header className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-end justify-between gap-4 mb-12">
         <div>
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+            <div className="w-10 h-10 rounded-xl bg-linear-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
               <Activity className="text-white" size={24} />
             </div>
             <h1 className="text-3xl font-black tracking-tight uppercase italic underline decoration-cyan-500 underline-offset-8">
