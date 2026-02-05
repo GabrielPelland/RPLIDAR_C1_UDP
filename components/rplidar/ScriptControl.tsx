@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardHeader, CardBody, Button, Chip, Divider } from "@heroui/react";
-import { Play, Square, Loader2 } from "lucide-react";
+import { Play, Square } from "lucide-react";
 
 const SCRIPTS = [
-    { name: "RPLidar Boot", path: "rplidar_boot.py", id: "boot" },
-    { name: "RPLidar Stop", path: "rplidar_stop.py", id: "stop" },
-    { name: "Lidar to Touch", path: "rplidar_toTouch.py", id: "toTouch" },
+    { name: "Lidar Boot", path: "rplidar_boot.py", id: "boot" },
+    { name: "Lidar Stop", path: "rplidar_stop.py", id: "stop" },
+    { name: "Lidar Touch", path: "rplidar_toTouch.py", id: "toTouch" },
 ];
 
 export function ScriptControl() {
@@ -46,43 +46,44 @@ export function ScriptControl() {
     };
 
     return (
-        <Card className="bg-zinc-900/50 border-zinc-800 shadow-xl backdrop-blur-md">
-            <CardHeader className="flex flex-col items-start px-6 pt-6">
-                <h2 className="text-xl font-bold bg-linear-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-                    Contrôle des Scripts
+        <Card className="bg-white border-zinc-200 shadow-sm">
+            <CardHeader className="flex flex-col items-start px-6 pt-5">
+                <h2 className="text-base font-bold text-zinc-800">
+                    Scripts Python
                 </h2>
-                <p className="text-sm text-zinc-400">Gérez les processus Python sur le Raspberry Pi</p>
+                <p className="text-xs text-zinc-500">Gestion des processus Raspberry Pi</p>
             </CardHeader>
-            <Divider className="my-2 bg-zinc-800" />
-            <CardBody className="gap-4 px-6 pb-6">
+            <Divider className="my-2 bg-zinc-100" />
+            <CardBody className="gap-3 px-6 pb-6">
                 {SCRIPTS.map((script) => {
                     const status = statuses[script.id]?.status || "stopped";
                     const isRunning = status === "running";
 
                     return (
-                        <div key={script.id} className="flex items-center justify-between p-3 rounded-xl bg-zinc-800/30 border border-zinc-700/50">
+                        <div key={script.id} className="flex items-center justify-between p-3 rounded-lg bg-zinc-50 border border-zinc-100">
                             <div className="flex flex-col">
-                                <span className="font-semibold text-zinc-100">{script.name}</span>
-                                <span className="text-xs text-zinc-500 font-mono">{script.path}</span>
+                                <span className="text-sm font-medium text-zinc-700">{script.name}</span>
+                                <span className="text-[10px] text-zinc-400 font-mono">{script.path}</span>
                             </div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-2">
                                 <Chip
                                     color={isRunning ? "success" : status === "error" ? "danger" : "default"}
                                     variant="flat"
                                     size="sm"
-                                    className="capitalize"
+                                    className="h-6 text-[10px] font-bold uppercase tracking-wider"
                                 >
                                     {status}
                                 </Chip>
                                 <Button
                                     isIconOnly
                                     size="sm"
-                                    variant="shadow"
-                                    color={isRunning ? "danger" : "success"}
+                                    variant="flat"
+                                    color={isRunning ? "danger" : "primary"}
                                     isLoading={loading === script.id}
                                     onPress={() => handleAction(script.id, script.path, isRunning ? "stop" : "start")}
+                                    className="w-8 h-8 min-w-8"
                                 >
-                                    {isRunning ? <Square size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}
+                                    {isRunning ? <Square size={14} fill="currentColor" /> : <Play size={14} fill="currentColor" />}
                                 </Button>
                             </div>
                         </div>

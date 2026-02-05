@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Card, CardHeader, CardBody, Input, Button, Divider, ScrollShadow, Chip } from "@heroui/react";
-import { Send, Radar, MessageSquare } from "lucide-react";
+import { Send, Terminal } from "lucide-react";
 
 export function UDPController() {
     const [messages, setMessages] = useState<any[]>([]);
@@ -49,87 +49,79 @@ export function UDPController() {
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-full">
-            <Card className="bg-zinc-900/50 border-zinc-800 shadow-xl backdrop-blur-md">
-                <CardHeader className="flex flex-col items-start px-6 pt-6">
-                    <div className="flex items-center gap-2">
-                        <Send size={20} className="text-purple-400" />
-                        <h2 className="text-xl font-bold bg-linear-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-                            Envoyer UDP
-                        </h2>
-                    </div>
-                    <p className="text-sm text-zinc-400">Envoyez des commandes aux périphériques réseau</p>
+            <Card className="bg-white border-zinc-200 shadow-sm">
+                <CardHeader className="flex flex-col items-start px-6 pt-5">
+                    <h2 className="text-base font-bold text-zinc-800">
+                        Envoi UDP
+                    </h2>
+                    <p className="text-xs text-zinc-500">Commandes vers le réseau</p>
                 </CardHeader>
-                <Divider className="my-2 bg-zinc-800" />
+                <Divider className="my-2 bg-zinc-100" />
                 <CardBody className="gap-4 px-6 pb-6">
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-3">
                         <Input
-                            label="IP Cible"
+                            label="IP"
                             size="sm"
                             value={targetIP}
                             onValueChange={setTargetIP}
-                            variant="bordered"
-                            classNames={{ inputWrapper: "border-zinc-700 bg-zinc-800/20" }}
+                            variant="flat"
+                            classNames={{ inputWrapper: "bg-zinc-50 border-zinc-100" }}
                         />
                         <Input
                             label="Port"
                             size="sm"
                             value={targetPort}
                             onValueChange={setTargetPort}
-                            variant="bordered"
-                            classNames={{ inputWrapper: "border-zinc-700 bg-zinc-800/20" }}
+                            variant="flat"
+                            classNames={{ inputWrapper: "bg-zinc-50 border-zinc-100" }}
                         />
                     </div>
                     <Input
-                        label="Message (JSON ou string)"
-                        placeholder='{"cmd": "start"}'
+                        label="Message"
+                        placeholder='Envoyer JSON/Texte'
                         value={message}
                         onValueChange={setMessage}
-                        variant="bordered"
-                        classNames={{ inputWrapper: "border-zinc-700 bg-zinc-800/20" }}
+                        variant="flat"
+                        size="sm"
+                        classNames={{ inputWrapper: "bg-zinc-50 border-zinc-100" }}
                     />
                     <Button
-                        color="secondary"
-                        variant="shadow"
-                        className="w-full"
+                        color="primary"
+                        variant="solid"
+                        size="sm"
+                        className="w-full font-bold"
                         onPress={handleSend}
                         isLoading={loading}
-                        startContent={!loading && <Send size={16} />}
+                        startContent={!loading && <Send size={14} />}
                     >
-                        Envoyer
+                        ENVOYER
                     </Button>
                 </CardBody>
             </Card>
 
-            <Card className="bg-zinc-900/50 border-zinc-800 shadow-xl backdrop-blur-md">
-                <CardHeader className="flex flex-col items-start px-6 pt-6">
-                    <div className="flex items-center gap-2">
-                        <Radar size={20} className="text-emerald-400" />
-                        <h2 className="text-xl font-bold bg-linear-to-r from-emerald-400 to-teal-500 bg-clip-text text-transparent">
-                            Flux UDP Entrant
-                        </h2>
-                    </div>
-                    <p className="text-sm text-zinc-400">Monitorez les paquets reçus sur le port 5005</p>
+            <Card className="bg-white border-zinc-200 shadow-sm">
+                <CardHeader className="flex flex-col items-start px-6 pt-5">
+                    <h2 className="text-base font-bold text-zinc-800">
+                        Flux Entrant
+                    </h2>
+                    <p className="text-xs text-zinc-500">Monitor port 5005</p>
                 </CardHeader>
-                <Divider className="my-2 bg-zinc-800" />
+                <Divider className="my-2 bg-zinc-100" />
                 <CardBody className="p-0">
-                    <ScrollShadow className="h-full max-h-[300px] p-6">
+                    <ScrollShadow className="h-[220px] p-4 bg-zinc-50/50">
                         {messages.length === 0 ? (
-                            <div className="text-zinc-600 italic">En attente de paquets...</div>
+                            <div className="text-zinc-400 text-xs italic">Aucun paquet reçu...</div>
                         ) : (
-                            <div className="flex flex-col gap-3">
+                            <div className="flex flex-col gap-2">
                                 {[...messages].reverse().map((msg, i) => (
-                                    <div key={i} className="p-3 rounded-lg bg-zinc-800/40 border border-zinc-700/30 text-xs">
-                                        <div className="flex items-center justify-between mb-2">
-                                            <Chip size="sm" variant="dot" color="success" className="border-none text-[10px]">
-                                                {msg.address}
-                                            </Chip>
-                                            <span className="text-zinc-500 text-[10px]">
-                                                {new Date(msg.timestamp).toLocaleTimeString()}
-                                            </span>
+                                    <div key={i} className="p-2.5 rounded border border-zinc-100 bg-white text-[11px] font-mono">
+                                        <div className="flex items-center justify-between mb-1 opacity-60">
+                                            <span className="font-bold">{msg.address}</span>
+                                            <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
                                         </div>
-                                        <pre className="text-emerald-500 font-mono overflow-x-auto">
-                                            {JSON.stringify(msg, null, 2)}
-                                        </pre>
+                                        <div className="text-zinc-600">
+                                            {JSON.stringify(msg, null, 1)}
+                                        </div>
                                     </div>
                                 ))}
                             </div>

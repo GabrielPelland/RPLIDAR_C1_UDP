@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Card, CardHeader, CardBody, ScrollShadow, Divider, Tabs, Tab } from "@heroui/react";
-import { Terminal } from "lucide-react";
+import { Card, CardHeader, CardBody, ScrollShadow, Divider, Tabs, Tab, Button } from "@heroui/react";
+import { Terminal, Trash2, ChevronRight } from "lucide-react";
 
 export function LogViewer() {
     const [logs, setLogs] = useState<Record<string, string[]>>({});
@@ -15,7 +15,7 @@ export function LogViewer() {
             const data = await res.json();
             const newLogs: Record<string, string[]> = {};
             Object.keys(data).forEach((key) => {
-                newLogs[key] = data[key].logs;
+                newLogs[key] = data[key].logs || [];
             });
             setLogs(newLogs);
         } catch (e) {
@@ -35,48 +35,70 @@ export function LogViewer() {
         }
     }, [logs, selectedScript]);
 
+    const clearLogs = () => {
+        setLogs(prev => ({ ...prev, [selectedScript]: [] }));
+    };
+
     const currentLogs = logs[selectedScript] || [];
 
     return (
-        <Card className="bg-zinc-900/50 border-zinc-800 shadow-xl backdrop-blur-md h-[500px]">
-            <CardHeader className="flex flex-col items-start px-6 pt-6">
-                <div className="flex items-center gap-2">
-                    <Terminal size={20} className="text-cyan-400" />
-                    <h2 className="text-xl font-bold bg-linear-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
-                        Logs Console
+        <Card className="bg-white border-zinc-200 shadow-sm h-[500px]">
+            <CardHeader className="flex flex-row items-center justify-between px-6 pt-5">
+                <div className="flex flex-col">
+                    <h2 className="text-base font-bold text-zinc-800 flex items-center gap-2">
+                        <Terminal size={16} /> Console Système
                     </h2>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Logs en direct</p>
                 </div>
-                <p className="text-sm text-zinc-400">Sortie en direct des processus</p>
+                <Button
+                    size="sm"
+                    variant="flat"
+                    isIconOnly
+                    onPress={clearLogs}
+                    className="hover:bg-red-50 hover:text-red-500 transition-colors"
+                >
+                    <Trash2 size={14} />
+                </Button>
             </CardHeader>
-            <Divider className="my-2 bg-zinc-800" />
-            <CardBody className="p-0">
+
+            <div className="px-6">
                 <Tabs
                     variant="underlined"
-                    aria-label="Script logs"
                     selectedKey={selectedScript}
                     onSelectionChange={(key) => setSelectedScript(key as string)}
-                    className="px-6"
+                    className="w-full"
                     classNames={{
-                        tabList: "gap-6 w-full relative rounded-none p-0 border-b border-divider",
-                        cursor: "w-full bg-cyan-400",
-                        tab: "max-w-fit px-0 h-12",
-                        tabContent: "group-data-[selected=true]:text-cyan-400"
+                        tabList: "gap-4 border-b border-zinc-100 p-0 h-10",
+                        cursor: "bg-zinc-800",
+                        tab: "px-0 h-10",
+                        tabContent: "text-zinc-400 group-data-[selected=true]:text-zinc-800 text-xs font-bold"
                     }}
                 >
-                    <Tab key="boot" title="Boot" />
-                    <Tab key="stop" title="Stop" />
-                    <Tab key="toTouch" title="Touch" />
+                    <Tab key="boot" title="BOOT" />
+                    <Tab key="stop" title="STOP" />
+                    <Tab key="toTouch" title="TOUCH" />
                 </Tabs>
-                <ScrollShadow ref={scrollRef} className="flex-1 p-6 font-mono text-xs bg-black/40 h-full overflow-y-auto">
+            </div>
+
+            <CardBody className="p-0 bg-zinc-50/50">
+                <ScrollShadow ref={scrollRef} className="flex-1 p-4 font-mono text-[11px] h-full overflow-y-auto">
                     {currentLogs.length === 0 ? (
-                        <div className="text-zinc-600 italic">Aucun log disponible pour ce script...</div>
+                        <div className="flex flex-col items-center justify-center h-full text-zinc-300 gap-2">
+                            <Terminal size={32} strokeWidth={1} />
+                            <span className="italic text-xs">Aucun log en attente...</span>
+                        </div>
                     ) : (
-                        currentLogs.map((log, i) => (
-                            <div key={i} className="mb-1 text-zinc-300 whitespace-pre-wrap">
-                                <span className="text-zinc-600 mr-2">[{i}]</span>
-                                {log}
-                            </div>
-                        ))
+                        <div className="flex flex-col">
+                            {currentLogs.map((log, i) => (
+                                <div key={i} className="flex gap-3 mb-1 group">
+                                    <span className="text-zinc-400 shrink-0 w-8 text-right select-none">{i + 1}</span>
+                                    <div className="flex items-start gap-1">
+                                        <ChevronRight size={10} className="mt-0.5 text-zinc-400 opacity-0 group-hover:opacity-100" />
+                                        <span className="text-zinc-700 break-all leading-relaxed">{log}</span>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     )}
                 </ScrollShadow>
             </CardBody>
