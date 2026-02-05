@@ -2,6 +2,7 @@ import math
 import time
 import json
 import socket
+import sys
 import pygame
 from pyrplidar import PyRPlidar
 
@@ -188,42 +189,53 @@ def main():
     lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
     
     # Robust init: ensure lidar is stopped and buffer is clean
-    print("PyRPlidar Info : initializing device...")
+    print("PyRPlidar Info : initializing device...", flush=True)
     try:
         lidar.stop()
         time.sleep(1.0)
+        lidar.disconnect()
+        time.sleep(1.0)
+        lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
         lidar.reset()
         time.sleep(2.0)
-    except:
-        pass
+    except Exception as e:
+        print(f"PyRPlidar Warning : Init cleanup failed: {e}", flush=True)
 
     lidar.set_motor_pwm(MOTOR_PWM)
     time.sleep(STARTUP_DELAY_S)
 
     # Signal handler for graceful stop from ScriptManager
     def handle_sigterm(signum, frame):
-        print("\nSIGTERM received. Stopping lidar...")
+        print("\nSIGTERM received. Stopping lidar...", flush=True)
         raise KeyboardInterrupt
 
     signal.signal(signal.SIGTERM, handle_sigterm)
 
-    MAX_RETRIES = 3
+    MAX_RETRIES = 5
     for attempt in range(MAX_RETRIES):
         try:
-            print(f"PyRPlidar Info : Starting scan (attempt {attempt+1}/{MAX_RETRIES})...")
+            print(f"PyRPlidar Info : Checking device info (attempt {attempt+1}/{MAX_RETRIES})...", flush=True)
+            info = lidar.get_info()
+            print(f"PyRPlidar Info : Device found - {info}", flush=True)
+            
+            print(f"PyRPlidar Info : Starting scan...", flush=True)
             scan_generator = lidar.force_scan()
             # Test first iteration to see if it works
             _test = next(scan_generator()) 
-            print("PyRPlidar Info : Scan started successfully.")
+            print("PyRPlidar Info : Scan started successfully.", flush=True)
             break
         except Exception as e:
-            print(f"PyRPlidar Error : Failed to start scan: {e}")
+            print(f"PyRPlidar Error : Failed to start scan: {e}", flush=True)
             if attempt < MAX_RETRIES - 1:
-                print("Retrying in 1s...")
-                lidar.stop()
-                time.sleep(1)
+                print("Retrying cleanup in 2s...", flush=True)
+                try:
+                    lidar.stop()
+                    time.sleep(1.0)
+                except:
+                    pass
+                time.sleep(1.0)
             else:
-                print("PyRPlidar Critical : Max retries exceeded. Exiting.")
+                print("PyRPlidar Critical : Max retries exceeded. Exiting.", flush=True)
                 return
 
     # Re-get generator after test
@@ -333,7 +345,7 @@ def main():
                     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
                     sock.sendto(data, udp_target)
                     if sweep_idx % 10 == 0:
-                        print(f"UDP Info : Sent sweep {sweep_idx}. Points in ROI: {len(pts01)}")
+                        print(f"UDP Info : Sent sweep {sweep_idx}. Points in ROI: {len(pts01)}", flush=True)
 
                     # --- UI draw
                     world_to_screen, _ = compute_view_transform(roi_width_mm, roi_depth_mm, zoom, padding_ratio)
