@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Card, CardHeader, CardBody, ScrollShadow, Divider, Tabs, Tab } from "@heroui/react";
+import { Card, CardHeader, CardBody, ScrollShadow, Divider, Tabs, Tab } from "@nextui-org/react";
 import { Terminal } from "lucide-react";
 
 export function LogViewer() {
@@ -42,7 +42,7 @@ export function LogViewer() {
             <CardHeader className="flex flex-col items-start px-6 pt-6">
                 <div className="flex items-center gap-2">
                     <Terminal size={20} className="text-cyan-400" />
-                    <h2 className="text-xl font-bold bg-linear-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
+                    <h2 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent">
                         Logs Console
                     </h2>
                 </div>
