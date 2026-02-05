@@ -5,8 +5,6 @@ import { Card, CardHeader, CardBody, Button, Chip, Divider } from "@heroui/react
 import { Play, Square } from "lucide-react";
 
 const SCRIPTS = [
-    { name: "Lidar Boot", path: "rplidar_boot.py", id: "boot" },
-    { name: "Lidar Stop", path: "rplidar_stop.py", id: "stop" },
     { name: "Lidar Touch", path: "rplidar_toTouch.py", id: "toTouch" },
 ];
 
