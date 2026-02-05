@@ -4,65 +4,48 @@ import pygame
 from pyrplidar import PyRPlidar
 
 # -----------------------------
-# Screen / UI config
+# Window / UI
 # -----------------------------
 WIDTH, HEIGHT = 900, 900
-CENTER = (WIDTH // 2, HEIGHT // 2 + 150)  # un peu plus bas pour avoir de l'espace UI en haut
-
 BLACK = (0, 0, 0)
-DARK_GREEN = (0, 90, 0)
-GREEN = (0, 255, 0)
-YELLOW = (255, 255, 0)
-RED = (255, 70, 70)
+GRID = (0, 70, 0)
 WHITE = (255, 255, 255)
 CYAN = (0, 200, 255)
 MAGENTA = (255, 0, 255)
+RED = (255, 70, 70)
+YELLOW = (255, 255, 0)
+GREEN = (0, 255, 0)
 
 # -----------------------------
-# Lidar config (calquée sur ton script)
+# Lidar config (comme ton script)
 # -----------------------------
 PORT = "/dev/ttyUSB0"
 BAUDRATE = 460800
 TIMEOUT_S = 3
-
 MOTOR_PWM = 500
 STARTUP_DELAY_S = 2.0
 
 MIN_DISTANCE_MM = 50
 MAX_DISTANCE_MM = 3000
 
-# Radar scale (pixels/mm)
-SCALE = (WIDTH * 0.45) / MAX_DISTANCE_MM
+# -----------------------------
+# ROI (modifiable en live)
+# -----------------------------
+roi_width_mm = 1000   # largeur totale (x: -w/2..+w/2)
+roi_depth_mm = 1000   # profondeur (y: 0..depth)
+ROI_STEP_MM = 50      # pas d’ajustement
 
-# ROI (1m x 1m) en mm dans le repère "devant"
-ROI_HALF_WIDTH_MM = 500   # x ∈ [-500, +500]
-ROI_DEPTH_MM = 1000       # y ∈ [0, 1000]
+# Vue / zoom
+zoom = 1.0            # 1.0 = fit ROI dans écran (avec padding)
+ZOOM_STEP = 0.1
+padding_ratio = 0.12  # marge autour de la ROI dans la vue (12%)
 
-# Orientation: 0° = "devant" (vers le bas du cadre)
+# Orientation : 0° = "devant" (vers le bas du cadre)
 ANGLE_OFFSET_DEG = 0.0
 
-# Détection fin de tour
+# Détection fin de tour (wrap)
 WRAP_HIGH_DEG = 350.0
 WRAP_LOW_DEG = 10.0
-
-
-def polar_to_xy_mm(angle_deg: float, distance_mm: float, angle_offset_deg: float):
-    """Repère: y avant, x gauche/droite. angle 0° pointe vers l'avant."""
-    a = math.radians(angle_deg + angle_offset_deg)
-    x = distance_mm * math.sin(a)
-    y = distance_mm * math.cos(a)
-    return x, y
-
-
-def xy_mm_to_screen(x_mm: float, y_mm: float):
-    """Projette (x,y) mm vers coordonnées écran. y avant = vers le bas de l'écran."""
-    x_px = CENTER[0] + int(x_mm * SCALE)
-    y_px = CENTER[1] + int(y_mm * SCALE)
-    return x_px, y_px
-
-
-def in_roi(x_mm: float, y_mm: float) -> bool:
-    return (-ROI_HALF_WIDTH_MM <= x_mm <= ROI_HALF_WIDTH_MM) and (0.0 <= y_mm <= ROI_DEPTH_MM)
 
 
 def dist_color(dist_mm: float):
@@ -73,86 +56,139 @@ def dist_color(dist_mm: float):
     return GREEN
 
 
-def build_background(font_small, font_title):
-    """Surface statique: cercles + labels + titre (évite de redessiner tout à chaque tour)."""
-    bg = pygame.Surface((WIDTH, HEIGHT))
-    bg.fill(BLACK)
-
-    # Cercles de référence (tous les 50 cm)
-    for r in range(500, MAX_DISTANCE_MM + 1, 500):
-        pygame.draw.circle(bg, DARK_GREEN, CENTER, int(r * SCALE), 1)
-        label = font_small.render(f"{r//10} cm", True, WHITE)
-        bg.blit(label, (CENTER[0] + int(r * SCALE) - 25, CENTER[1] - 10))
-
-    # Axe avant (ligne centrale)
-    pygame.draw.line(bg, DARK_GREEN, CENTER, (CENTER[0], CENTER[1] + int(MAX_DISTANCE_MM * SCALE)), 1)
-
-    # Titre
-    title_surface = font_title.render("RPLidar C1 - ROI 1m x 1m (UI)", True, WHITE)
-    bg.blit(title_surface, (WIDTH // 2 - title_surface.get_width() // 2, 20))
-
-    return bg
+def polar_to_xy_mm(angle_deg: float, distance_mm: float, angle_offset_deg: float):
+    """
+    Repère:
+      y positif = avant (vers le bas du cadre)
+      x positif = droite
+      angle 0° = avant
+    """
+    a = math.radians(angle_deg + angle_offset_deg)
+    x = distance_mm * math.sin(a)
+    y = distance_mm * math.cos(a)
+    return x, y
 
 
-def draw_roi_rect(screen):
-    """Dessine le carré ROI 1m×1m devant le lidar (en mm => pixels)."""
-    # ROI en coords mm: x [-500, +500], y [0, 1000]
-    x0, y0 = xy_mm_to_screen(-ROI_HALF_WIDTH_MM, 0)
-    x1, y1 = xy_mm_to_screen( ROI_HALF_WIDTH_MM, ROI_DEPTH_MM)
+def compute_view_transform(roi_w_mm: float, roi_d_mm: float, zoom: float, padding_ratio: float):
+    """
+    Calcule la projection ROI->écran pour que la ROI soit centrée et zoomée.
+    La vue englobe la ROI + padding, puis applique zoom (zoom>1 = plus zoomé).
+    """
+    # Fenêtre de monde à afficher (world units = mm)
+    pad_x = roi_w_mm * padding_ratio
+    pad_y = roi_d_mm * padding_ratio
 
-    # pygame rect needs top-left and width/height
-    left = min(x0, x1)
-    top = min(y0, y1)
-    w = abs(x1 - x0)
-    h = abs(y1 - y0)
+    world_w = roi_w_mm + 2 * pad_x
+    world_h = roi_d_mm + 2 * pad_y
 
-    pygame.draw.rect(screen, CYAN, pygame.Rect(left, top, w, h), 2)
+    # Scale pour fit dans l'écran, puis applique zoom (zoom>1 => plus grand => on voit moins)
+    scale_fit = min(WIDTH / world_w, HEIGHT / world_h)
+    scale = scale_fit * zoom
 
-    # petit repère "avant"
-    pygame.draw.circle(screen, CYAN, xy_mm_to_screen(0, ROI_DEPTH_MM), 4)
+    # On centre la ROI au milieu de l’écran.
+    # ROI en world: x ∈ [-w/2, +w/2], y ∈ [0, d]
+    roi_center_x = 0.0
+    roi_center_y = roi_d_mm / 2.0
+
+    screen_center = (WIDTH / 2.0, HEIGHT / 2.0)
+
+    def world_to_screen(x_mm: float, y_mm: float):
+        sx = screen_center[0] + (x_mm - roi_center_x) * scale
+        sy = screen_center[1] + (y_mm - roi_center_y) * scale
+        return int(sx), int(sy)
+
+    return world_to_screen, scale
+
+
+def in_roi(x_mm: float, y_mm: float, roi_w_mm: float, roi_d_mm: float) -> bool:
+    half = roi_w_mm / 2.0
+    return (-half <= x_mm <= half) and (0.0 <= y_mm <= roi_d_mm)
+
+
+def draw_grid_and_roi(screen, world_to_screen, roi_w_mm, roi_d_mm, font):
+    screen.fill(BLACK)
+
+    # Dessine grille légère tous les 10 cm (100 mm)
+    grid_step = 100
+    half = roi_w_mm / 2.0
+
+    # Lignes verticales
+    x = -half
+    while x <= half + 1e-6:
+        p0 = world_to_screen(x, 0)
+        p1 = world_to_screen(x, roi_d_mm)
+        pygame.draw.line(screen, GRID, p0, p1, 1)
+        x += grid_step
+
+    # Lignes horizontales
+    y = 0
+    while y <= roi_d_mm + 1e-6:
+        p0 = world_to_screen(-half, y)
+        p1 = world_to_screen(half, y)
+        pygame.draw.line(screen, GRID, p0, p1, 1)
+        y += grid_step
+
+    # ROI rectangle
+    top_left = world_to_screen(-half, 0)
+    bottom_right = world_to_screen(half, roi_d_mm)
+    left = min(top_left[0], bottom_right[0])
+    top = min(top_left[1], bottom_right[1])
+    w = abs(bottom_right[0] - top_left[0])
+    h = abs(bottom_right[1] - top_left[1])
+    pygame.draw.rect(screen, CYAN, pygame.Rect(left, top, w, h), 3)
+
+    # Origine (lidar) à (0,0)
+    ox, oy = world_to_screen(0, 0)
+    pygame.draw.circle(screen, WHITE, (ox, oy), 5)
+
+    # Indication "forward"
+    fx, fy = world_to_screen(0, min(roi_d_mm, 200))
+    pygame.draw.line(screen, WHITE, (ox, oy), (fx, fy), 2)
+
+    # Labels rapides
+    label = font.render("ROI view (zoomed)", True, WHITE)
+    screen.blit(label, (20, 20))
 
 
 def main():
-    global ANGLE_OFFSET_DEG
+    global roi_width_mm, roi_depth_mm, zoom, ANGLE_OFFSET_DEG
 
     pygame.init()
     screen = pygame.display.set_mode((WIDTH, HEIGHT))
-    pygame.display.set_caption("RPLidar C1 UI")
+    pygame.display.set_caption("RPLidar C1 - ROI Zoom UI")
     clock = pygame.time.Clock()
 
+    font = pygame.font.SysFont(None, 22)
     font_small = pygame.font.SysFont(None, 20)
-    font_ui = pygame.font.SysFont(None, 22)
-    font_title = pygame.font.SysFont(None, 28, bold=True)
 
-    # Pré-render background
-    background = build_background(font_small, font_title)
-
-    # Lidar init
+    # Lidar
     lidar = PyRPlidar()
     lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
     lidar.set_motor_pwm(MOTOR_PWM)
     time.sleep(STARTUP_DELAY_S)
 
-    # Pattern identique à ton script
+    # Même pattern que ton script: callable generator
     scan_generator = lidar.force_scan()
 
     running = True
     paused = False
-    show_all_points = True   # True: affiche tout, False: affiche seulement ROI
-    points_all = []          # points du tour (pour affichage)
-    points_roi = []          # points filtrés ROI (pour stats + affichage)
+    show_all_points = False  # par défaut: ROI seulement (plus clair)
     prev_angle = None
     sweep_idx = 0
 
+    # buffers par tour
+    points_all = []  # (x_mm, y_mm, dist_mm)
+    points_roi = []
+
     try:
         for scan in scan_generator():
-            # Events UI
+            # --- UI events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
 
                 if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE or event.key == pygame.K_q:
+                    if event.key in (pygame.K_ESCAPE, pygame.K_q):
                         running = False
 
                     elif event.key == pygame.K_SPACE:
@@ -161,7 +197,7 @@ def main():
                     elif event.key == pygame.K_a:
                         show_all_points = not show_all_points
 
-                    # Ajuster l'offset d'angle
+                    # Offset angle
                     elif event.key == pygame.K_LEFT:
                         ANGLE_OFFSET_DEG -= 5.0
                     elif event.key == pygame.K_RIGHT:
@@ -170,71 +206,85 @@ def main():
                         ANGLE_OFFSET_DEG -= 1.0
                     elif event.key == pygame.K_UP:
                         ANGLE_OFFSET_DEG += 1.0
-
                     elif event.key == pygame.K_r:
                         ANGLE_OFFSET_DEG = 0.0
+
+                    # ROI size controls
+                    # W/S => largeur +/- ; E/D => profondeur +/-
+                    elif event.key == pygame.K_w:
+                        roi_width_mm = min(4000, roi_width_mm + ROI_STEP_MM)
+                    elif event.key == pygame.K_s:
+                        roi_width_mm = max(200, roi_width_mm - ROI_STEP_MM)
+                    elif event.key == pygame.K_e:
+                        roi_depth_mm = min(4000, roi_depth_mm + ROI_STEP_MM)
+                    elif event.key == pygame.K_d:
+                        roi_depth_mm = max(200, roi_depth_mm - ROI_STEP_MM)
+
+                    # Zoom controls
+                    elif event.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                        zoom = min(5.0, zoom + ZOOM_STEP)
+                    elif event.key in (pygame.K_MINUS, pygame.K_UNDERSCORE, pygame.K_KP_MINUS):
+                        zoom = max(0.2, zoom - ZOOM_STEP)
+                    elif event.key == pygame.K_z:
+                        zoom = 1.0
 
             if not running:
                 break
 
             if paused:
-                # on ne consomme pas/affiche pas, mais on laisse la boucle tourner
                 clock.tick(60)
                 continue
 
             angle = float(scan.angle)
-            dist = float(scan.distance)  # mm
+            dist_mm = float(scan.distance)
 
-            # Filtrage distance
-            if MIN_DISTANCE_MM <= dist <= MAX_DISTANCE_MM:
-                x_mm, y_mm = polar_to_xy_mm(angle, dist, ANGLE_OFFSET_DEG)
+            if MIN_DISTANCE_MM <= dist_mm <= MAX_DISTANCE_MM:
+                x_mm, y_mm = polar_to_xy_mm(angle, dist_mm, ANGLE_OFFSET_DEG)
+                points_all.append((x_mm, y_mm, dist_mm))
 
-                # Stocker pour display (tous points)
-                points_all.append((x_mm, y_mm, dist))
+                if in_roi(x_mm, y_mm, roi_width_mm, roi_depth_mm):
+                    points_roi.append((x_mm, y_mm, dist_mm))
 
-                # Filtrer ROI
-                if in_roi(x_mm, y_mm):
-                    points_roi.append((x_mm, y_mm, dist))
-
-            # Détection fin de tour (wrap)
+            # --- end-of-sweep detection
             if prev_angle is not None:
                 wrapped = (prev_angle > WRAP_HIGH_DEG and angle < WRAP_LOW_DEG) or (angle < prev_angle)
                 if wrapped:
                     sweep_idx += 1
 
-                    # Redraw frame
-                    screen.blit(background, (0, 0))
-                    draw_roi_rect(screen)
+                    world_to_screen, scale = compute_view_transform(
+                        roi_width_mm, roi_depth_mm, zoom, padding_ratio
+                    )
+                    draw_grid_and_roi(screen, world_to_screen, roi_width_mm, roi_depth_mm, font)
 
-                    # Choix d'affichage: tous points ou seulement ROI
+                    # Draw points
                     if show_all_points:
-                        for x_mm, y_mm, dist_mm in points_all:
-                            px, py = xy_mm_to_screen(x_mm, y_mm)
-                            pygame.draw.circle(screen, dist_color(dist_mm), (px, py), 2)
+                        for x_mm, y_mm, d in points_all:
+                            px, py = world_to_screen(x_mm, y_mm)
+                            pygame.draw.circle(screen, dist_color(d), (px, py), 2)
                     else:
-                        for x_mm, y_mm, dist_mm in points_roi:
-                            px, py = xy_mm_to_screen(x_mm, y_mm)
+                        for x_mm, y_mm, d in points_roi:
+                            px, py = world_to_screen(x_mm, y_mm)
                             pygame.draw.circle(screen, MAGENTA, (px, py), 3)
 
-                    # UI overlay
+                    # UI overlay text
                     ui_lines = [
                         f"Sweep: {sweep_idx}",
-                        f"Points (all): {len(points_all)}",
-                        f"Points (ROI 1m x 1m): {len(points_roi)}",
-                        f"Angle offset: {ANGLE_OFFSET_DEG:.1f} deg",
-                        "Controls: Q/Esc=Quit | Space=Pause | A=Toggle all/ROI | Arrows=Offset (±1/±5) | R=Reset offset",
+                        f"Mode: {'ALL' if show_all_points else 'ROI only'}   (toggle: A)",
+                        f"ROI: width={roi_width_mm}mm  depth={roi_depth_mm}mm   (W/S width, E/D depth)",
+                        f"Zoom: {zoom:.1f}   (+/- or keypad, Z reset)",
+                        f"Angle offset: {ANGLE_OFFSET_DEG:.1f} deg   (arrows, R reset)",
+                        f"Points(all): {len(points_all)}   Points(ROI): {len(points_roi)}",
+                        "Controls: Q/Esc quit | Space pause",
                     ]
-
-                    y = 60
+                    y = HEIGHT - 22 * (len(ui_lines) + 1)
                     for line in ui_lines:
-                        surf = font_ui.render(line, True, WHITE)
+                        surf = font_small.render(line, True, WHITE)
                         screen.blit(surf, (20, y))
                         y += 22
 
                     pygame.display.flip()
                     clock.tick(60)
 
-                    # Reset buffers pour prochain tour
                     points_all.clear()
                     points_roi.clear()
 
@@ -244,7 +294,6 @@ def main():
         print("\nStopped (Ctrl+C).")
 
     finally:
-        # Stop propre
         try:
             lidar.stop()
         except Exception:
