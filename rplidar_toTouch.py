@@ -7,7 +7,7 @@ from pyrplidar import PyRPlidar
 # -----------------------------
 # UDP target
 # -----------------------------
-UDP_IP = "192.168.0.12"
+UDP_IP = "10.0.1.2"
 UDP_PORT = 5005
 SEND_HZ = 60.0           # latence ~ 1/60 = 16.6ms
 SEND_PERIOD = 1.0 / SEND_HZ
