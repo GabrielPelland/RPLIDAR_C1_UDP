@@ -33,7 +33,7 @@ class ScriptManager {
         const fullPath = path.resolve(process.cwd(), "rplidar_control", scriptPath);
         console.log(`Starting script: python3 ${fullPath}`);
 
-        const child = spawn("python3", [fullPath]);
+        const child = spawn("python3", ["-u", fullPath]);
 
         const instance: ScriptInstance = {
             process: child,

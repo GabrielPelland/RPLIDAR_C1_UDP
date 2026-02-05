@@ -91,7 +91,9 @@ def main():
     print("PyRPlidar Info : initializing device...")
     try:
         lidar.stop()
-        time.sleep(0.5)
+        time.sleep(1.0)
+        lidar.reset()
+        time.sleep(2.0)
     except:
         pass
 
@@ -105,6 +107,26 @@ def main():
 
     signal.signal(signal.SIGTERM, handle_sigterm)
 
+    MAX_RETRIES = 3
+    for attempt in range(MAX_RETRIES):
+        try:
+            print(f"PyRPlidar Info : Starting scan (attempt {attempt+1}/{MAX_RETRIES})...")
+            scan_generator = lidar.force_scan()
+            # Test first iteration to see if it works
+            _test = next(scan_generator()) 
+            print("PyRPlidar Info : Scan started successfully.")
+            break
+        except Exception as e:
+            print(f"PyRPlidar Error : Failed to start scan: {e}")
+            if attempt < MAX_RETRIES - 1:
+                print("Retrying in 1s...")
+                lidar.stop()
+                time.sleep(1)
+            else:
+                print("PyRPlidar Critical : Max retries exceeded. Exiting.")
+                return
+
+    # Re-get generator after test
     scan_generator = lidar.force_scan()
 
     # Buffer glissant: (t, x01, y01, gx, gy)
@@ -112,6 +134,7 @@ def main():
     window_s = WINDOW_MS / 1000.0
 
     last_send = time.perf_counter()
+    packet_count = 0
 
     try:
         for scan in scan_generator():
@@ -150,11 +173,15 @@ def main():
                         sx, sy = sums[key]
                         points.append((sx / c, sy / c))
 
-                if len(points) > MAX_POINTS_PER_PACKET:
-                    step = len(points) / MAX_POINTS_PER_PACKET
-                    points = [points[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
+                if points:
+                    if len(points) > MAX_POINTS_PER_PACKET:
+                        step = len(points) / MAX_POINTS_PER_PACKET
+                        points = [points[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
 
-                sock.sendto(build_xy_packet(points), target)
+                    sock.sendto(build_xy_packet(points), target)
+                    packet_count += 1
+                    if packet_count % 100 == 0:
+                        print(f"UDP Info : Sent {packet_count} packets. Current points in ROI: {len(points)}")
 
                 last_send = now
 
