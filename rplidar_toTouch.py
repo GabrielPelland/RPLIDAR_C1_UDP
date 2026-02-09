@@ -7,7 +7,7 @@ from pyrplidar import PyRPlidar
 # -----------------------------
 # UDP target
 # -----------------------------
-UDP_IP = "10.0.1.2"
+UDP_IP = "10.0.1.5"
 UDP_PORT = 5005
 SEND_HZ = 60.0           # latence ~ 1/60 = 16.6ms
 SEND_PERIOD = 1.0 / SEND_HZ
@@ -35,8 +35,8 @@ MAX_DISTANCE_MM = 3000
 # -----------------------------
 # ROI + orientation
 # -----------------------------
-ROI_WIDTH_MM = 1000
-ROI_DEPTH_MM = 1000
+ROI_WIDTH_MM = 950
+ROI_DEPTH_MM = 950
 ANGLE_OFFSET_DEG = 0.0 
 
 
