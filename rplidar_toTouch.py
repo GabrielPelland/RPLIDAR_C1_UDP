@@ -35,8 +35,8 @@ MAX_DISTANCE_MM = 3000
 # -----------------------------
 # ROI + orientation
 # -----------------------------
-ROI_WIDTH_MM = 1000
-ROI_DEPTH_MM = 1000
+ROI_WIDTH_MM = 950
+ROI_DEPTH_MM = 950
 ANGLE_OFFSET_DEG = 0.0 
 
 
