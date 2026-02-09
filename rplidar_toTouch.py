@@ -1,13 +1,10 @@
 import math
 import time
 import socket
-import asyncio
 from collections import deque, defaultdict
 
 import pygame
-
-# rplidarc1 (repo dsaadatmandi)
-from scanner import RPLidar  # <-- important: c'est comme dans le README rplidarc1
+from pyrplidar import PyRPlidar
 
 # -----------------------------
 # UDP target
@@ -26,11 +23,13 @@ MIN_HITS = 2
 MAX_POINTS_PER_PACKET = 600
 
 # -----------------------------
-# Lidar (C1)
+# Lidar
 # -----------------------------
 PORT = "/dev/ttyUSB0"
 BAUDRATE = 460800
-TIMEOUT_S = 0.2  # rplidarc1 utilise des timeouts courts (voir README)
+TIMEOUT_S = 3
+MOTOR_PWM = 500
+STARTUP_DELAY_S = 2.0
 
 MIN_DISTANCE_MM = 50
 MAX_DISTANCE_MM = 3000
@@ -43,18 +42,22 @@ ROI_DEPTH_MM = 950
 ANGLE_OFFSET_DEG = 0.0
 
 # -----------------------------
-# Pygame viz
+# Pygame UI / Viz
 # -----------------------------
 WIN_W, WIN_H = 900, 900
+PANEL_H = 90  # bandeau bas pour infos
 BG = (12, 12, 16)
-GRID = (30, 30, 42)
-AXIS = (70, 70, 95)
+GRID = (35, 35, 50)
+AXIS = (80, 80, 110)
 PTS = (240, 240, 255)
-TXT = (190, 190, 210)
+TXT = (200, 200, 220)
+PANEL = (18, 18, 26)
+WARN = (255, 170, 80)
 
 POINT_RADIUS = 3
 DRAW_GRID = True
 DRAW_AXES = True
+FPS_LIMIT = 120
 
 
 def clamp01(v: float) -> float:
@@ -62,6 +65,7 @@ def clamp01(v: float) -> float:
 
 
 def polar_to_xy_mm(angle_deg: float, distance_mm: float, angle_offset_deg: float):
+    # Repère: angle 0° = "devant", y = avant, x = droite
     a = math.radians(angle_deg + angle_offset_deg)
     x = distance_mm * math.sin(a)
     y = distance_mm * math.cos(a)
@@ -75,13 +79,15 @@ def in_roi(x_mm: float, y_mm: float, w_mm: float, d_mm: float) -> bool:
 
 def normalize_xy01(x_mm: float, y_mm: float, w_mm: float, d_mm: float):
     half = w_mm / 2.0
-    x01 = (x_mm + half) / w_mm
-    y01 = y_mm / d_mm
+    x01 = (x_mm + half) / w_mm   # 0 gauche → 1 droite
+    y01 = y_mm / d_mm            # 0 haut   → 1 bas
     return clamp01(x01), clamp01(y01)
 
 
 def quantize(x01: float, y01: float, step: float):
-    return int(x01 / step), int(y01 / step)
+    gx = int(x01 / step)
+    gy = int(y01 / step)
+    return gx, gy
 
 
 def build_xy_packet(points):
@@ -92,108 +98,118 @@ def build_xy_packet(points):
 
 
 def xy01_to_screen(x01: float, y01: float, w: int, h: int):
-    return int(x01 * (w - 1)), int(y01 * (h - 1))
+    # zone de dessin = (0..WIN_W, 0..WIN_H-PANEL_H)
+    x = int(x01 * (w - 1))
+    y = int(y01 * (h - 1))
+    return x, y
 
 
-def draw_grid(screen, w, h):
+def draw_grid(surface, w, h):
+    # grille 10x10
     for i in range(1, 10):
         x = int(i * w / 10)
         y = int(i * h / 10)
-        pygame.draw.line(screen, GRID, (x, 0), (x, h), 1)
-        pygame.draw.line(screen, GRID, (0, y), (w, y), 1)
+        pygame.draw.line(surface, GRID, (x, 0), (x, h), 1)
+        pygame.draw.line(surface, GRID, (0, y), (w, y), 1)
 
 
-def draw_overlay(screen, font, points_count, raw_buf_count, window_ms, send_hz, fps):
-    pad = 10
-    lines = [
-        f"points sent: {points_count}",
-        f"raw samples in window: {raw_buf_count}  (WINDOW_MS={window_ms})",
-        f"SEND_HZ: {send_hz:.1f}   FPS(viz): {fps:.1f}",
-        "ESC / Close window to quit",
-    ]
-    y = pad
+def draw_panel(screen, font, lines, warning=None):
+    y0 = WIN_H - PANEL_H
+    pygame.draw.rect(screen, PANEL, pygame.Rect(0, y0, WIN_W, PANEL_H))
+    pygame.draw.line(screen, GRID, (0, y0), (WIN_W, y0), 1)
+
+    y = y0 + 10
     for s in lines:
         surf = font.render(s, True, TXT)
-        screen.blit(surf, (pad, y))
-        y += surf.get_height() + 4
+        screen.blit(surf, (10, y))
+        y += surf.get_height() + 6
+
+    if warning:
+        surf = font.render(warning, True, WARN)
+        screen.blit(surf, (10, y0 + PANEL_H - surf.get_height() - 10))
 
 
-async def main_async():
+def main():
     # UDP
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     target = (UDP_IP, UDP_PORT)
 
-    # Pygame init (DOIT être dans le thread principal)
+    # Pygame init
     pygame.init()
     screen = pygame.display.set_mode((WIN_W, WIN_H))
-    pygame.display.set_caption("RPLIDAR C1 ROI (x,y normalized 0..1)")
-    font = pygame.font.SysFont("monospace", 16)
+    pygame.display.set_caption("RPLidar -> UDP + Viz (ROI normalized 0..1)")
+    font = pygame.font.SysFont("monospace", 18)
     clock = pygame.time.Clock()
 
-    # Lidar (rplidarc1)
-    lidar = RPLidar(PORT, BAUDRATE, timeout=TIMEOUT_S)
+    # Lidar init
+    lidar = PyRPlidar()
+    lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
+    lidar.set_motor_pwm(MOTOR_PWM)
+    time.sleep(STARTUP_DELAY_S)
+
+    scan_generator = lidar.force_scan()
 
     # Buffer glissant: (t, x01, y01, gx, gy)
     buf = deque()
     window_s = WINDOW_MS / 1000.0
 
     last_send = time.perf_counter()
-    last_viz = time.perf_counter()
-
-    latest_points = []
+    last_packet_points = []
+    last_packet_time = time.perf_counter()
     running = True
 
-    # Lance le scan en tâche asyncio (alimente lidar.output_queue)
-    scan_task = asyncio.create_task(lidar.simple_scan(make_return_dict=False))
-
     try:
-        while running:
+        for scan in scan_generator():
             now = time.perf_counter()
 
-            # --- events pygame ---
+            # --- UI events ---
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
-                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        running = False
+                    elif event.key == pygame.K_g:
+                        global DRAW_GRID
+                        DRAW_GRID = not DRAW_GRID
+                    elif event.key == pygame.K_a:
+                        global DRAW_AXES
+                        DRAW_AXES = not DRAW_AXES
 
-            # --- consommer des mesures depuis la queue (non bloquant) ---
-            # On vide la queue pour rattraper le débit
-            drained = 0
-            while not lidar.output_queue.empty():
-                data = await lidar.output_queue.get()
-                drained += 1
+            if not running:
+                break
 
-                angle = float(data["a_deg"])
-                dist_mm = float(data["d_mm"])
+            # 1) Ajouter point si ROI
+            dist_mm = float(scan.distance)
+            if MIN_DISTANCE_MM <= dist_mm <= MAX_DISTANCE_MM:
+                angle = float(scan.angle)
+                x_mm, y_mm = polar_to_xy_mm(angle, dist_mm, ANGLE_OFFSET_DEG)
 
-                if MIN_DISTANCE_MM <= dist_mm <= MAX_DISTANCE_MM:
-                    x_mm, y_mm = polar_to_xy_mm(angle, dist_mm, ANGLE_OFFSET_DEG)
-                    if in_roi(x_mm, y_mm, ROI_WIDTH_MM, ROI_DEPTH_MM):
-                        x01, y01 = normalize_xy01(x_mm, y_mm, ROI_WIDTH_MM, ROI_DEPTH_MM)
-                        gx, gy = quantize(x01, y01, GRID_STEP)
-                        buf.append((now, x01, y01, gx, gy))
+                if in_roi(x_mm, y_mm, ROI_WIDTH_MM, ROI_DEPTH_MM):
+                    x01, y01 = normalize_xy01(x_mm, y_mm, ROI_WIDTH_MM, ROI_DEPTH_MM)
+                    gx, gy = quantize(x01, y01, GRID_STEP)
+                    buf.append((now, x01, y01, gx, gy))
 
-            # purge fenêtre glissante
+            # 2) Purge fenêtre glissante
             cutoff = now - window_s
             while buf and buf[0][0] < cutoff:
                 buf.popleft()
 
-            # --- envoi UDP périodique ---
+            # 3) Envoi périodique
             if (now - last_send) >= SEND_PERIOD:
                 counts = defaultdict(int)
                 sums = defaultdict(lambda: [0.0, 0.0])
 
                 for _t, x01, y01, gx, gy in buf:
-                    k = (gx, gy)
-                    counts[k] += 1
-                    sums[k][0] += x01
-                    sums[k][1] += y01
+                    key = (gx, gy)
+                    counts[key] += 1
+                    sums[key][0] += x01
+                    sums[key][1] += y01
 
                 points = []
-                for k, c in counts.items():
+                for key, c in counts.items():
                     if c >= MIN_HITS:
-                        sx, sy = sums[k]
+                        sx, sy = sums[key]
                         points.append((sx / c, sy / c))
 
                 if len(points) > MAX_POINTS_PER_PACKET:
@@ -201,71 +217,68 @@ async def main_async():
                     points = [points[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
 
                 sock.sendto(build_xy_packet(points), target)
-                latest_points = points
                 last_send = now
+                last_packet_points = points
+                last_packet_time = now
 
-            # --- viz ~60fps ---
-            if (now - last_viz) >= (1.0 / 60.0):
-                screen.fill(BG)
+            # 4) Render (à chaque itération; limité par clock.tick)
+            draw_h = WIN_H - PANEL_H
+            screen.fill(BG)
 
-                if DRAW_GRID:
-                    draw_grid(screen, WIN_W, WIN_H)
+            # grille + axes dans la zone de dessin
+            if DRAW_GRID:
+                draw_grid(screen, WIN_W, draw_h)
 
-                if DRAW_AXES:
-                    pygame.draw.rect(screen, AXIS, pygame.Rect(0, 0, WIN_W - 1, WIN_H - 1), 1)
-                    cx = int(0.5 * (WIN_W - 1))
-                    pygame.draw.line(screen, AXIS, (cx, 0), (cx, WIN_H), 1)
+            if DRAW_AXES:
+                # bord ROI (zone de dessin)
+                pygame.draw.rect(screen, AXIS, pygame.Rect(0, 0, WIN_W - 1, draw_h - 1), 1)
+                # axe x central (x=0.5)
+                cx = int(0.5 * (WIN_W - 1))
+                pygame.draw.line(screen, AXIS, (cx, 0), (cx, draw_h), 1)
 
-                for x01, y01 in latest_points:
-                    x, y = xy01_to_screen(x01, y01, WIN_W, WIN_H)
-                    pygame.draw.circle(screen, PTS, (x, y), POINT_RADIUS)
+            # points = ce qui est envoyé UDP (stable)
+            for x01, y01 in last_packet_points:
+                x, y = xy01_to_screen(x01, y01, WIN_W, draw_h)
+                pygame.draw.circle(screen, PTS, (x, y), POINT_RADIUS)
 
-                fps = clock.get_fps()
-                draw_overlay(
-                    screen, font,
-                    points_count=len(latest_points),
-                    raw_buf_count=len(buf),
-                    window_ms=WINDOW_MS,
-                    send_hz=SEND_HZ,
-                    fps=fps
-                )
+            # infos UI
+            fps = clock.get_fps()
+            age_ms = (now - last_packet_time) * 1000.0
+            warning = None
+            if age_ms > 250:
+                warning = f"WARNING: no UDP packet update for {age_ms:.0f} ms"
 
-                pygame.display.flip()
-                clock.tick(120)
-                last_viz = now
+            lines = [
+                f"UDP -> {UDP_IP}:{UDP_PORT}   SEND_HZ={SEND_HZ:.1f}   packet_pts={len(last_packet_points)}",
+                f"WINDOW_MS={WINDOW_MS}  GRID_STEP={GRID_STEP:.3f}  MIN_HITS={MIN_HITS}  buf_samples={len(buf)}",
+                f"ROI {ROI_WIDTH_MM}x{ROI_DEPTH_MM} mm   ANGLE_OFFSET={ANGLE_OFFSET_DEG:.1f} deg   FPS={fps:.1f}",
+                "Keys: ESC quit | G toggle grid | A toggle axes",
+            ]
+            draw_panel(screen, font, lines, warning=warning)
 
-            # Laisse respirer l’event loop
-            await asyncio.sleep(0)
+            pygame.display.flip()
+            clock.tick(FPS_LIMIT)
 
     except KeyboardInterrupt:
-        pass
+        print("\nStopped (Ctrl+C).")
+
     finally:
-        # stop scan
         try:
-            lidar.stop_event.set()
+            lidar.stop()
         except Exception:
             pass
-
-        # attend la fin du task scan
         try:
-            await asyncio.wait_for(scan_task, timeout=1.0)
+            lidar.set_motor_pwm(0)
         except Exception:
             pass
-
-        # shutdown / reset
         try:
-            lidar.shutdown()
+            lidar.disconnect()
         except Exception:
-            try:
-                lidar.reset()
-            except Exception:
-                pass
-
+            pass
         try:
             sock.close()
         except Exception:
             pass
-
         try:
             pygame.quit()
         except Exception:
@@ -273,4 +286,4 @@ async def main_async():
 
 
 if __name__ == "__main__":
-    asyncio.run(main_async())
+    main()
