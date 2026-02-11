@@ -210,8 +210,8 @@ def main():
                     step = len(points_to_send) / MAX_POINTS_PER_PACKET
                     points_to_send = [points_to_send[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
 
-                if points_to_send:
-                    sock.sendto(build_xy_packet(points_to_send), target)
+                # Toujours envoyer le paquet (au moins le header si points_to_send est vide)
+                sock.sendto(build_xy_packet(points_to_send), target)
 
                 last_send = now
 
