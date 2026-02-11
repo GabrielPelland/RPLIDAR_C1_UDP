@@ -1,6 +1,7 @@
 import math
 import time
 import socket
+import pygame
 from collections import deque, defaultdict
 from pyrplidar import PyRPlidar
 
@@ -11,6 +12,17 @@ UDP_IP = "10.0.1.5"
 UDP_PORT = 5005
 SEND_HZ = 60.0           # latence ~ 1/60 = 16.6ms
 SEND_PERIOD = 1.0 / SEND_HZ
+
+# -----------------------------
+# Visualization / UI
+# -----------------------------
+WIDTH, HEIGHT = 800, 800
+BLACK   = (15, 15, 20)
+GRID    = (40, 40, 50)
+WHITE   = (255, 255, 255)
+CYAN    = (0, 255, 255)
+MAGENTA = (255, 0, 255)
+RED     = (255, 50, 50)
 
 # -----------------------------
 # Micro-buffer + nettoyage
@@ -79,24 +91,56 @@ def build_xy_packet(points):
 
 
 def main():
+    # --- Networking ---
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     target = (UDP_IP, UDP_PORT)
 
-    lidar = PyRPlidar()
-    lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
-    lidar.set_motor_pwm(MOTOR_PWM)
-    time.sleep(STARTUP_DELAY_S)
+    # --- Pygame Init ---
+    pygame.init()
+    screen = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("RPLidar C1 - TouchDesigner Bridge & Viz")
+    font = pygame.font.SysFont(None, 24)
 
-    scan_generator = lidar.force_scan()
+    # Padding and scaling for visualization
+    padding = 50
+    draw_w = WIDTH - 2 * padding
+    draw_h = HEIGHT - 2 * padding
+
+    def to_screen(x01, y01):
+        sx = padding + x01 * draw_w
+        sy = padding + y01 * draw_h
+        return int(sx), int(sy)
+
+    # --- Lidar Init ---
+    lidar = PyRPlidar()
+    try:
+        lidar.connect(port=PORT, baudrate=BAUDRATE, timeout=TIMEOUT_S)
+        lidar.set_motor_pwm(MOTOR_PWM)
+        time.sleep(STARTUP_DELAY_S)
+        scan_generator = lidar.force_scan()
+    except Exception as e:
+        print(f"Error connecting to Lidar: {e}")
+        return
 
     # Buffer glissant: (t, x01, y01, gx, gy)
     buf = deque()
     window_s = WINDOW_MS / 1000.0
-
     last_send = time.perf_counter()
+    running = True
 
     try:
         for scan in scan_generator():
+            # 0) Events Pygame
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE or event.key == pygame.K_q:
+                        running = False
+
+            if not running:
+                break
+
             now = time.perf_counter()
 
             # 1) Ajouter point si ROI
@@ -115,7 +159,7 @@ def main():
             while buf and buf[0][0] < cutoff:
                 buf.popleft()
 
-            # 3) Envoi périodique
+            # 3) Envoi périodique + Visualisation
             if (now - last_send) >= SEND_PERIOD:
                 counts = defaultdict(int)
                 sums = defaultdict(lambda: [0.0, 0.0])
@@ -126,17 +170,48 @@ def main():
                     sums[key][0] += x01
                     sums[key][1] += y01
 
-                points = []
+                points_to_send = []
                 for key, c in counts.items():
                     if c >= MIN_HITS:
                         sx, sy = sums[key]
-                        points.append((sx / c, sy / c))
+                        points_to_send.append((sx / c, sy / c))
 
-                if len(points) > MAX_POINTS_PER_PACKET:
-                    step = len(points) / MAX_POINTS_PER_PACKET
-                    points = [points[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
+                # --- Draw ---
+                screen.fill(BLACK)
+                
+                # Draw ROI boundary
+                r_left, r_top = to_screen(0, 0)
+                r_right, r_bottom = to_screen(1, 1)
+                pygame.draw.rect(screen, GRID, (r_left, r_top, r_right-r_left, r_bottom-r_top), 1)
 
-                sock.sendto(build_xy_packet(points), target)
+                # Draw Lidar Source (0.5 on X center, 0 on Y top)
+                lx, ly = to_screen(0.5, 0)
+                pygame.draw.circle(screen, WHITE, (lx, ly), 5)
+
+                # Draw raw points from buffer (fading magenta)
+                for _t, x01, y01, gx, gy in buf:
+                    px, py = to_screen(x01, y01)
+                    pygame.draw.rect(screen, MAGENTA, (px-1, py-1, 2, 2))
+
+                # Draw aggregated points (sent to TD)
+                for x01, y01 in points_to_send:
+                    px, py = to_screen(x01, y01)
+                    pygame.draw.circle(screen, CYAN, (px, py), 4)
+
+                # Info
+                status_txt = f"Sending {len(points_to_send)} points to {UDP_IP}:{UDP_PORT} @ {SEND_HZ}Hz"
+                txt_surf = font.render(status_txt, True, WHITE)
+                screen.blit(txt_surf, (10, HEIGHT - 30))
+
+                pygame.display.flip()
+
+                # --- Send ---
+                if len(points_to_send) > MAX_POINTS_PER_PACKET:
+                    step = len(points_to_send) / MAX_POINTS_PER_PACKET
+                    points_to_send = [points_to_send[int(i * step)] for i in range(MAX_POINTS_PER_PACKET)]
+
+                if points_to_send:
+                    sock.sendto(build_xy_packet(points_to_send), target)
 
                 last_send = now
 
@@ -146,21 +221,15 @@ def main():
     finally:
         try:
             lidar.stop()
-        except Exception:
-            pass
-        try:
             lidar.set_motor_pwm(0)
-        except Exception:
-            pass
-        try:
             lidar.disconnect()
-        except Exception:
-            pass
+        except: pass
         try:
             sock.close()
-        except Exception:
-            pass
+        except: pass
+        pygame.quit()
 
 
 if __name__ == "__main__":
     main()
+
