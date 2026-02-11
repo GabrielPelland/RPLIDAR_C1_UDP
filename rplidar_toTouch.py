@@ -28,7 +28,7 @@ RED     = (255, 50, 50)
 # Micro-buffer + nettoyage
 # -----------------------------
 WINDOW_MS = 70            # fenêtre glissante courte (50-90ms)
-GRID_STEP = 0.01          # taille cellule en coords 0..1 (0.01 = 1% => ~1 cm si ROI=1m)
+GRID_STEP = 0.02          # taille cellule en coords 0..1 (0.01 = 1% => ~1 cm si ROI=1m)
 MIN_HITS = 2              # cellule doit être vue au moins 2 fois dans la fenêtre
 MAX_POINTS_PER_PACKET = 600  # MTU
 
