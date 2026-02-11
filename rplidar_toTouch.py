@@ -2,6 +2,9 @@ import math
 import time
 import socket
 import pygame
+import threading
+import io
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from collections import deque, defaultdict
 from pyrplidar import PyRPlidar
 
@@ -12,6 +15,13 @@ UDP_IP = "10.0.1.5"
 UDP_PORT = 5005
 SEND_HZ = 60.0           # latence ~ 1/60 = 16.6ms
 SEND_PERIOD = 1.0 / SEND_HZ
+
+# -----------------------------
+# Web Stream Config
+# -----------------------------
+STREAM_PORT = 8080
+STREAM_HZ = 30.0         # Limiter le CPU (30 fps suffisent pour le web)
+STREAM_PERIOD = 1.0 / STREAM_HZ
 
 # -----------------------------
 # Visualization / UI
@@ -90,6 +100,49 @@ def build_xy_packet(points):
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+# --- Classes pour le streaming Web ---
+
+class StreamingOutput:
+    def __init__(self):
+        self.frame = None
+        self.condition = threading.Condition()
+
+    def update(self, frame):
+        with self.condition:
+            self.frame = frame
+            self.condition.notify_all()
+
+class StreamingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Age', 0)
+            self.send_header('Cache-Control', 'no-cache, private')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Content-Type', 'multipart/x-mixed-replace; boundary=FRAME')
+            self.end_headers()
+            try:
+                while True:
+                    with global_output.condition:
+                        global_output.condition.wait()
+                        frame = global_output.frame
+                    self.wfile.write(b'--FRAME\r\n')
+                    self.send_header('Content-Type', 'image/jpeg')
+                    self.send_header('Content-Length', len(frame))
+                    self.end_headers()
+                    self.wfile.write(frame)
+                    self.wfile.write(b'\r\n')
+            except Exception:
+                pass
+        else:
+            self.send_error(404)
+
+    def log_message(self, format, *args):
+        return # Désactiver les logs envahissants dans le terminal
+
+global_output = StreamingOutput()
+
+
 def main():
     # --- Networking ---
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -111,6 +164,12 @@ def main():
         sy = padding + y01 * draw_h
         return int(sx), int(sy)
 
+    # --- Streaming Server Start ---
+    server = HTTPServer(('', STREAM_PORT), StreamingHandler)
+    stream_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    stream_thread.start()
+    print(f"Serveur Web actif sur http://localhost:{STREAM_PORT} (ou l'IP de ce Mac)")
+
     # --- Lidar Init ---
     lidar = PyRPlidar()
     try:
@@ -126,6 +185,7 @@ def main():
     buf = deque()
     window_s = WINDOW_MS / 1000.0
     last_send = time.perf_counter()
+    last_stream = 0
     running = True
 
     try:
@@ -205,6 +265,18 @@ def main():
 
                 pygame.display.flip()
 
+                # --- Capture pour le Stream ---
+                if (now - last_stream) >= STREAM_PERIOD:
+                    try:
+                        img_buffer = io.BytesIO()
+                        # Pygame supporte le JPEG via sauvegarde dans un buffer avec l'extension suggérée
+                        pygame.image.save(screen, "screenshot.jpg")
+                        with open("screenshot.jpg", "rb") as f:
+                            global_output.update(f.read())
+                        last_stream = now
+                    except Exception as e:
+                        print(f"Error capturing for stream: {e}")
+
                 # --- Send ---
                 if len(points_to_send) > MAX_POINTS_PER_PACKET:
                     step = len(points_to_send) / MAX_POINTS_PER_PACKET
@@ -226,6 +298,7 @@ def main():
         except: pass
         try:
             sock.close()
+            server.shutdown()
         except: pass
         pygame.quit()
 
