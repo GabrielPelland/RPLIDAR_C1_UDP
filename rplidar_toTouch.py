@@ -143,6 +143,18 @@ class StreamingHandler(BaseHTTPRequestHandler):
 global_output = StreamingOutput()
 
 
+def get_local_ip():
+    try:
+        # Trick to get the local IP used for external traffic
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return "127.0.0.1"
+
+
 def main():
     # --- Networking ---
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -165,10 +177,15 @@ def main():
         return int(sx), int(sy)
 
     # --- Streaming Server Start ---
-    server = HTTPServer(('', STREAM_PORT), StreamingHandler)
+    local_ip = get_local_ip()
+    server = HTTPServer(('0.0.0.0', STREAM_PORT), StreamingHandler)
     stream_thread = threading.Thread(target=server.serve_forever, daemon=True)
     stream_thread.start()
-    print(f"Serveur Web actif sur http://localhost:{STREAM_PORT} (ou l'IP de ce Mac)")
+    print("\n" + "="*50)
+    print(f"📡 Serveur Web actif !")
+    print(f"🔗 Local  : http://localhost:{STREAM_PORT}")
+    print(f"🔗 Réseau : http://{local_ip}:{STREAM_PORT}")
+    print("="*50 + "\n")
 
     # --- Lidar Init ---
     lidar = PyRPlidar()
